@@ -1,6 +1,8 @@
 const express = require('express');
 const app = express();
-const { User } = require('./db');
+const { User, Kitten } = require('./db');
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
 
 app.use(express.json());
 app.use(express.urlencoded({extended:true}));
@@ -21,21 +23,99 @@ app.get('/', async (req, res, next) => {
 
 // Verifies token with jwt.verify and sets req.user
 // TODO - Create authentication middleware
+app.use(async (req, res, next)=>{
+  const auth = req.header('Authorization');
+  if(!auth){
+    res.send(401);
+    next();
+  } else {
+    const [, token] = auth.split(' ');
+    const user = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = user;
+    next();
+  }
+})
 
 // POST /register
 // OPTIONAL - takes req.body of {username, password} and creates a new user with the hashed password
-
+app.post('/register', async (req, res, next) =>{
+  try{
+    const { username, password } = req.body;
+    const hash = await bcrypt.hash(password, 10);
+    const user = await User.create({ username, password: hash });
+    const token = jwt.sign( user.username, process.env.JWT_SECRET);
+    res.send({ message: 'success', token: token });
+  } catch(error){
+    next(error);
+  }
+})
 // POST /login
 // OPTIONAL - takes req.body of {username, password}, finds user by username, and compares the password with the hashed version from the DB
-
+app.post('/login', async (req, res, next) => {
+  const isMatch = await bcrypt.compare(password, foundUser.password);
+  try{
+    const { username, password } = req.body;
+    const [ foundUser ] = await User.findAll({ where: { username }});
+    if (!foundUser){
+      res.send(401)
+    } if(!isMatch){
+      res.status(401).send("Unauthorized");
+    } else {
+      const token = jwt.sign(username, process.env.JWT_SECRET);
+      res.status(200).send({message: 'success', token: token });
+    }
+  }catch(error){
+    next(error);
+  }
+})
 // GET /kittens/:id
 // TODO - takes an id and returns the cat with that id
-
+app.get('/kittens/:id', async (req, res, next ) => {
+    try{
+      const kitten = await Kitten.findByPk(req.params.id);
+    if(!req.user){
+      res.send(401);
+    } else if (req.user.id !== kitten.ownerId){
+      res.send(401);
+    } else {
+      res.send({ name: kitten.name, color: kitten.color, age: kitten.age });
+    }
+  }catch(error){
+    next(error);
+  }
+})
 // POST /kittens
 // TODO - takes req.body of {name, age, color} and creates a new cat with the given name, age, and color
-
+app.post('/kittens', async (req, res, next) => {
+  try{
+    if(!req.user){
+      res.send(401);
+    } else {
+      const { name, color, age } = req.body;
+      const kitten = await Kitten.create({ ownerId: req.user.id, name, color, age });
+      res.status(201).send({ name: kitten.name, age: kitten.age, color: kitten.color });
+    }
+  }catch(error){
+    next(error);
+  }
+})
 // DELETE /kittens/:id
 // TODO - takes an id and deletes the cat with that id
+app.delete('/kittens/:id', async (req, res, next) => {
+  try{
+    const kitten = await Kitten.findByPk(req.params.id);
+    if(!req.user){
+      res.send(401);
+    } else if (req.user.id !== kitten.ownerId){
+      res.send(401);
+    } else {
+      await kitten.destroy()
+      res.send(204);
+    }
+  }catch(error){
+    next(error);
+  }
+})
 
 // error handling middleware, so failed tests receive them
 app.use((error, req, res, next) => {
